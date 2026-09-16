@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Streaming Chat Test</title>
+  <style>
+    body { font-family: sans-serif; max-width: 600px; margin: 40px auto; }
+    #output { border: 1px solid #ccc; padding: 12px; min-height: 100px; white-space: pre-wrap; }
+    input { width: 70%; padding: 8px; }
+    button { padding: 8px 16px; }
+  </style>
+</head>
+<body>
+  <h2>Gemini Streaming Chat Test</h2>
+  <p>Make sure the server is running at <code>http://127.0.0.1:8000</code> first.</p>
+  <input id="message" placeholder="Ask something..." value="Explain streaming in one paragraph" />
+  <button onclick="send()">Send</button>
+  <div id="output"></div>
+
+  <script>
+    async function send() {
+      const message = document.getElementById("message").value;
+      const output = document.getElementById("output");
+      output.textContent = "";
+
+      // fetch + ReadableStream is how you consume SSE manually (an
+      // alternative to the built-in EventSource API, which only supports
+      // GET requests - we need POST here to send the message body).
+      const response = await fetch("http://127.0.0.1:8000/chat/stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message }),
+      });
+
+      if (!response.ok) {
+        output.textContent = `Error: ${response.status} ${response.statusText}`;
+        return;
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        // Each SSE message looks like: "data: {...}\n\n"
+        const text = decoder.decode(value);
+        const lines = text.split("\n").filter((l) => l.startsWith("data: "));
+
+        for (const line of lines) {
+          const json = JSON.parse(line.replace("data: ", ""));
+          if (json.type === "chunk") {
+            output.textContent += json.text;
+          } else if (json.type === "error") {
+            output.textContent += `\n[ERROR: ${json.message}]`;
+          }
+          // "done" event needs no handling here, but you could use it to
+          // stop a "typing..." indicator in a real UI.
+        }
+      }
+    }
+  </script>
+</body>
+</html>
